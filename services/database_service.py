@@ -1,7 +1,7 @@
 import sqlite3
 import os
-import json
 import hashlib
+import json
 
 # Path to the SQLite database file
 db_path = os.path.join('data', 'users.db')
@@ -10,69 +10,52 @@ db_path = os.path.join('data', 'users.db')
 def create_db():
     # Check if the database already exists
     if not os.path.exists(db_path):
+        # Connect to the SQLite database (it will be created if it doesn't exist)
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Create users table
+        # Create a table for storing user information
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
+            username TEXT NOT NULL,
             password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            current_stage TEXT NOT NULL,
-            field_of_study TEXT NOT NULL,
-            end_goal TEXT NOT NULL
+            role TEXT NOT NULL,                  -- Student or Professional
+            role_specific_field TEXT NOT NULL,   -- Field for student stage or professional job details
+            end_goal TEXT NOT NULL               -- User's end goal
         )
         ''')
 
-        # Create table to store roadmaps
+        # Create a table for storing roadmaps
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS roadmaps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
-            roadmap TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (username) REFERENCES users(username)
+            roadmap TEXT NOT NULL,               -- JSON format for storing roadmaps
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         ''')
 
-        # Create table to store quiz results
+        # Create a table for storing quiz results
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS quiz_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            quiz_data TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            is_passed BOOLEAN NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (username) REFERENCES users(username)
+            quiz_data TEXT NOT NULL,             -- JSON format for storing quiz questions and answers
+            result TEXT NOT NULL,                -- User's answers in JSON format
+            score REAL NOT NULL,                 -- User's score
+            feedback TEXT                        -- Feedback for incorrect answers
         )
         ''')
 
-        # Create table to store user progress
+        # Create a table for storing progress tracking
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_progress (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            milestone TEXT NOT NULL,
-            is_completed BOOLEAN NOT NULL DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (username) REFERENCES users(username)
-        )
-        ''')
-
-        # Create table to store gap analysis/feedback
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS gap_analysis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            feedback TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (username) REFERENCES users(username)
+            phase TEXT NOT NULL,                 -- Phase of the roadmap (e.g., Phase 1)
+            milestone TEXT NOT NULL,             -- Specific milestone the user completed
+            completed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         ''')
 
@@ -82,27 +65,26 @@ def create_db():
     else:
         print("Database already exists.")
 
-# User registration and login
+# Hash password
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-def register_user(username, password, role, current_stage, field_of_study, end_goal):
+# User Registration
+def register_user(username, password, role, role_specific_field, end_goal):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     hashed_password = hash_password(password)
 
-    try:
-        cursor.execute('''
-        INSERT INTO users (username, password, role, current_stage, field_of_study, end_goal)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (username, hashed_password, role, current_stage, field_of_study, end_goal))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        print("Username already exists.")
-    finally:
-        conn.close()
+    cursor.execute('''
+    INSERT INTO users (username, password, role, role_specific_field, end_goal)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (username, hashed_password, role, role_specific_field, end_goal))
 
+    conn.commit()
+    conn.close()
+
+# User Login
 def login_user(username, password):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -114,54 +96,49 @@ def login_user(username, password):
     ''', (username, hashed_password))
 
     user = cursor.fetchone()
-    conn.close()
 
+    conn.close()
     return user
 
-
-
-# Retrieve user profile
+# Get user profile
 def get_user_profile(username):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute('''
-    SELECT username, role, current_stage, field_of_study, end_goal FROM users WHERE username = ?
+    SELECT username, role, role_specific_field, end_goal FROM users WHERE username = ?
     ''', (username,))
-    
+
     user_profile = cursor.fetchone()
     conn.close()
 
     if user_profile:
         return {
-            "username": user_profile[0],
-            "role": user_profile[1],
-            "current_stage": user_profile[2],
-            "field_of_study": user_profile[3],
-            "end_goal": user_profile[4]
+            'username': user_profile[0],
+            'role': user_profile[1],
+            'role_specific_field': user_profile[2],
+            'end_goal': user_profile[3]
         }
-    return None
+    else:
+        return None
 
 # Update user profile
-def update_user_profile(username, field_of_study, end_goal):
+def update_user_profile(username, role, role_specific_field, end_goal):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute('''
-    UPDATE users 
-    SET field_of_study = ?, end_goal = ?
-    WHERE username = ?
-    ''', (field_of_study, end_goal, username))
+    UPDATE users SET role = ?, role_specific_field = ?, end_goal = ? WHERE username = ?
+    ''', (role, role_specific_field, end_goal, username))
 
     conn.commit()
     conn.close()
 
-# Save user's roadmap in the database
+# Save the user's roadmap in JSON format
 def save_user_roadmap(username, roadmap):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Convert roadmap dictionary to JSON string
     roadmap_json = json.dumps(roadmap)
 
     cursor.execute('''
@@ -172,35 +149,7 @@ def save_user_roadmap(username, roadmap):
     conn.commit()
     conn.close()
 
-# Get user's roadmap history
-def get_user_roadmap(username):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-    SELECT roadmap FROM roadmaps WHERE username = ? ORDER BY id DESC LIMIT 1
-    ''', (username,))
-
-    roadmap = cursor.fetchone()
-    conn.close()
-
-    if roadmap:
-        return json.loads(roadmap[0])
-    return None
-
-# Roadmap functions
-def save_user_roadmap(username, roadmap_json):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-    INSERT INTO roadmaps (username, roadmap)
-    VALUES (?, ?)
-    ''', (username, json.dumps(roadmap_json)))
-
-    conn.commit()
-    conn.close()
-
+# Get the user's roadmap history
 def get_user_roadmap(username):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -217,69 +166,60 @@ def get_user_roadmap(username):
     else:
         return None
 
-# Quiz and progress tracking
-def save_quiz_results(username, phase, quiz_data, score, is_passed):
+# Save the quiz results
+def save_quiz_results(username, quiz_data, result, score, feedback):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    quiz_data_json = json.dumps(quiz_data)
+    result_json = json.dumps(result)
+
     cursor.execute('''
-    INSERT INTO quiz_results (username, phase, quiz_data, score, is_passed)
+    INSERT INTO quiz_results (username, quiz_data, result, score, feedback)
     VALUES (?, ?, ?, ?, ?)
-    ''', (username, phase, json.dumps(quiz_data), score, is_passed))
+    ''', (username, quiz_data_json, result_json, score, feedback))
 
     conn.commit()
     conn.close()
 
-def track_user_progress(username, phase, milestone, is_completed):
+# Track user progress for milestones
+def track_user_progress(username, phase, milestone):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    # Check if this milestone is already marked as complete
     cursor.execute('''
-    INSERT INTO user_progress (username, phase, milestone, is_completed)
-    VALUES (?, ?, ?, ?)
-    ''', (username, phase, milestone, is_completed))
+    SELECT * FROM user_progress WHERE username = ? AND phase = ? AND milestone = ?
+    ''', (username, phase, milestone))
 
-    conn.commit()
+    if not cursor.fetchone():
+        # Insert the new completed milestone into the progress table
+        cursor.execute('''
+        INSERT INTO user_progress (username, phase, milestone)
+        VALUES (?, ?, ?)
+        ''', (username, phase, milestone))
+
+        conn.commit()
+
     conn.close()
 
+# Get the user's progress
 def get_user_progress(username):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    # Fetch all completed milestones for the user
     cursor.execute('''
-    SELECT phase, milestone, is_completed FROM user_progress WHERE username = ?
+    SELECT phase, milestone FROM user_progress WHERE username = ?
     ''', (username,))
 
-    progress = cursor.fetchall()
+    rows = cursor.fetchall()
     conn.close()
+
+    progress = {}
+    for phase, milestone in rows:
+        if phase not in progress:
+            progress[phase] = []
+        progress[phase].append(milestone)
 
     return progress
-
-# Gap analysis/feedback functions
-def save_gap_analysis(username, phase, feedback):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-    INSERT INTO gap_analysis (username, phase, feedback)
-    VALUES (?, ?)
-    ''', (username, phase, json.dumps(feedback)))
-
-    conn.commit()
-    conn.close()
-
-def get_gap_analysis(username, phase):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-    SELECT feedback FROM gap_analysis WHERE username = ? AND phase = ?
-    ''', (username, phase))
-
-    feedback = cursor.fetchone()
-    conn.close()
-
-    if feedback:
-        return json.loads(feedback[0])
-    else:
-        return None
